@@ -1,0 +1,10 @@
+say --port=8080 --local --name='tobii' --hidden
+say -p 8080 -n 'tobii' -l
+
+say host --help
+[option]: host/client
+--port=[port_no]        -p=[port_no]    
+--name=[name]           -n=[name]       
+--local                 -l              
+--desc=[description]    -d=[description]
+--hidden
