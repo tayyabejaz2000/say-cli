@@ -1,6 +1,8 @@
 package say
 
 import (
+	"fmt"
+	"net"
 	"say/src/encryption"
 	"say/src/forwarding"
 )
@@ -11,7 +13,7 @@ type Config struct {
 	Name            string `json:"name"`
 	BroadcastName   bool   `json:"broadcast_name"`
 	IsLocal         bool   `json:"is_local"`
-	Port            int    `json:"port"`
+	Port            uint16 `json:"port"`
 	PortDescription string `json:"port_description"`
 }
 
@@ -48,7 +50,34 @@ func CreateChatApp(config *Config) *chatapp {
 	return &chatapp{
 		ClientKeyPair: keyPair,
 		Device:        device,
-		Other:         nil, //No connection uptill now
 		AppConfig:     config,
+		//No connection uptill now
+		Other: nil,
 	}
+}
+
+func (c *chatapp) Run() error {
+	var listener, err = net.Listen("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", c.AppConfig.Port))
+	if err != nil {
+		fmt.Printf("[Error: %s]: Error Opening TCP Socket\n", err.Error())
+		return err
+	}
+	conn, err := listener.Accept()
+	if err != nil {
+		fmt.Printf("[Error: %s]: Error Accepting Connection\n", err.Error())
+		return err
+	}
+	/*
+		TODO: Actual App Code
+	*/
+	conn.Close()
+	if err != nil {
+		fmt.Printf("[Error: %s]: Error Closing Connection\n", err.Error())
+		return err
+	}
+	return listener.Close()
+}
+
+func (c *chatapp) Clean() {
+	c.Device.Close()
 }

@@ -1,25 +1,29 @@
 package forwarding
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	upnp "gitlab.com/NebulousLabs/go-upnp"
 )
 
 type Device struct {
 	PublicIP      string
-	ForwardedPort int16
+	ForwardedPort uint16
 
 	upnpDevice *upnp.IGD
 }
 
-func CreateDevice(port int, description string) (*Device, error) {
-	var igd, err = upnp.Discover()
+func CreateDevice(port uint16, description string) (*Device, error) {
+	var ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var igd, err = upnp.DiscoverCtx(ctx)
 	if err != nil {
 		fmt.Printf("[Error: %s]: Error Initializing UPnP Device\n", err.Error())
 		return nil, err
 	}
-	err = igd.Forward(uint16(port), description)
+	err = igd.Forward(port, description)
 	if err != nil {
 		fmt.Printf("[Error: %s]: Error Forwarding Port %d\n", err.Error(), port)
 		return nil, err
@@ -29,14 +33,14 @@ func CreateDevice(port int, description string) (*Device, error) {
 		fmt.Printf("[Error: %s]: Error retrieving Public IP for Device\n", err.Error())
 		return &Device{
 			PublicIP:      "",
-			ForwardedPort: int16(port),
+			ForwardedPort: port,
 			upnpDevice:    igd,
 		}, err
 	}
 
 	return &Device{
 		PublicIP:      ip,
-		ForwardedPort: int16(port),
+		ForwardedPort: port,
 		upnpDevice:    igd,
 	}, nil
 }

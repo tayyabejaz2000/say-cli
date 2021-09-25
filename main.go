@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	var port = flag.Int("port", 8080, "Set Port to run app on")
+	var port = flag.Uint("port", 8080, "Set Port to run app on")
 	var username, _ = os.LookupEnv("USERNAME")
 	var name = flag.String("name", username, "Name for the client")
 	var desc = flag.String("description", "Chat App", "Description for port forwarding")
@@ -23,7 +23,7 @@ func main() {
 		Name:            *name,
 		BroadcastName:   *hidden,
 		IsLocal:         *isLocal,
-		Port:            *port,
+		Port:            uint16(*port),
 		PortDescription: *desc,
 	}
 	var json, _ = json.Marshal(appConfig)
