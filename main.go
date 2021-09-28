@@ -4,22 +4,20 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	say "say/src"
 )
 
 func main() {
-	var port = flag.Uint("port", 8080, "Set Port to run app on")
-	var username, _ = os.LookupEnv("USERNAME")
+	var username, _ = os.LookupEnv("Username for Application")
 	var name = flag.String("name", username, "Name for the client")
-	var desc = flag.String("description", "Chat App", "Description for port forwarding")
-	var isLocal = flag.Bool("local", false, "Should this app run locally")
-	var hidden = flag.Bool("hidden", false, "Should the name be broadcasted")
+	var isLocal = flag.Bool("local", false, "Run this application on local network, skips UPnP port forwarding")
+	var hidden = flag.Bool("hidden", false, "Broadcast the username to partner")
+	var port = flag.Uint("port", 8080, "Set Port for TCP Socket [For running over network, this port will be forwarded by UPnP]")
+	var desc = flag.String("desc", "Say App", "Description for port forwarding [Ignored for running locally]")
 	flag.Parse()
 
 	var appConfig = say.Config{
-		Host:            flag.Args()[0] == "host",
 		Name:            *name,
 		BroadcastName:   *hidden,
 		IsLocal:         *isLocal,
@@ -29,13 +27,12 @@ func main() {
 	var json, _ = json.Marshal(appConfig)
 	fmt.Println(string(json))
 
-	var app = say.CreateChatApp(&appConfig)
-	var listener, err = net.Listen("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", appConfig.Port))
+	var app, err = say.CreateChatApp(&appConfig)
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error Creating Net Socket\n", err.Error())
+		os.Exit(-1)
 	}
-	fmt.Scanf("%s")
-	fmt.Print(app, listener)
-	listener.Close()
-	app.Device.Close()
+
+	app.Run()
+
+	app.Clean()
 }

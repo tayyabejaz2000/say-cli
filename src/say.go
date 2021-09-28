@@ -9,7 +9,6 @@ import (
 
 ///TODO: (bool)Read Key Value Pair from cert/file
 type Config struct {
-	Host            bool   `json:"host"`
 	Name            string `json:"name"`
 	BroadcastName   bool   `json:"broadcast_name"`
 	IsLocal         bool   `json:"is_local"`
@@ -24,7 +23,7 @@ type chatapp struct {
 	Other         *partner
 }
 
-func CreateChatApp(config *Config) *chatapp {
+func CreateChatApp(config *Config) (*chatapp, error) {
 	var port = config.Port
 	var description = config.PortDescription
 	var device *forwarding.Device = nil
@@ -45,39 +44,50 @@ func CreateChatApp(config *Config) *chatapp {
 	}
 
 	//Can do it once both parties join
-	var keyPair = encryption.GenerateKeyPair()
+	var keyPair, err = encryption.GenerateKeyPair()
+	if err != nil {
+		return nil, err
+	}
 
 	return &chatapp{
 		ClientKeyPair: keyPair,
 		Device:        device,
 		AppConfig:     config,
-		//No connection uptill now
-		Other: nil,
-	}
+		Other:         nil,
+	}, nil
 }
 
-func (c *chatapp) Run() error {
+func (c *chatapp) Run() {
 	var listener, err = net.Listen("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", c.AppConfig.Port))
 	if err != nil {
 		fmt.Printf("[Error: %s]: Error Opening TCP Socket\n", err.Error())
-		return err
 	}
+
 	conn, err := listener.Accept()
 	if err != nil {
 		fmt.Printf("[Error: %s]: Error Accepting Connection\n", err.Error())
-		return err
 	}
+
 	/*
 		TODO: Actual App Code
 	*/
-	conn.Close()
+
+	err = conn.Close()
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error Closing Connection\n", err.Error())
-		return err
+		fmt.Printf("[Error: %s]: Error Closing Client Connection\n", err.Error())
 	}
-	return listener.Close()
+
+	err = listener.Close()
+	if err != nil {
+		fmt.Printf("[Error: %s]: Error Closing Host Connection\n", err.Error())
+	}
 }
 
 func (c *chatapp) Clean() {
-	c.Device.Close()
+	if c.Device != nil {
+		var err = c.Device.Close()
+		if err != nil {
+			fmt.Printf("[Error: %s]: Error Closing\n", err.Error())
+		}
+	}
 }

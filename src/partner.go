@@ -3,9 +3,8 @@ package say
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"fmt"
+	"errors"
 	"math/big"
-	"os"
 )
 
 type partner struct {
@@ -24,11 +23,10 @@ func CreatePartner(name string, publicKey_E int, publicKey_N *big.Int) *partner 
 	}
 }
 
-func (p *partner) EncryptMessage(message []byte) []byte {
+func (p *partner) EncryptMessage(message []byte) ([]byte, error) {
 	var encrypted, err = rsa.EncryptPKCS1v15(rand.Reader, p.PublicKey, message)
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error Encrypting Message", err.Error())
-		os.Exit(-1)
+		return nil, errors.New("error encrypting message")
 	}
-	return encrypted
+	return encrypted, nil
 }

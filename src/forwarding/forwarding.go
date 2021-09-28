@@ -2,7 +2,7 @@ package forwarding
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	upnp "gitlab.com/NebulousLabs/go-upnp"
@@ -20,22 +20,19 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 	defer cancel()
 	var igd, err = upnp.DiscoverCtx(ctx)
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error Initializing UPnP Device\n", err.Error())
-		return nil, err
+		return nil, errors.New("error initializing upnp device")
 	}
 	err = igd.Forward(port, description)
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error Forwarding Port %d\n", err.Error(), port)
-		return nil, err
+		return nil, errors.New("error forwarding port")
 	}
 	ip, err := igd.ExternalIP()
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error retrieving Public IP for Device\n", err.Error())
 		return &Device{
 			PublicIP:      "",
 			ForwardedPort: port,
 			upnpDevice:    igd,
-		}, err
+		}, errors.New("error retrieving public ip for device")
 	}
 
 	return &Device{
@@ -45,6 +42,10 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 	}, nil
 }
 
-func (d *Device) Close() {
-	d.upnpDevice.Clear(uint16(d.ForwardedPort))
+func (d *Device) Close() error {
+	var err = d.upnpDevice.Clear(uint16(d.ForwardedPort))
+	if err != nil {
+		return errors.New("error removing forwarded port")
+	}
+	return nil
 }
