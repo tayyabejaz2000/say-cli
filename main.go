@@ -12,6 +12,7 @@ func main() {
 	var username, _ = os.LookupEnv("Username for Application")
 	var name = flag.String("name", username, "Name for the client")
 	var isLocal = flag.Bool("local", false, "Run this application on local network, skips UPnP port forwarding")
+	var isHost = flag.Bool("host", false, "Open TCP Port for partner to connect")
 	var hidden = flag.Bool("hidden", false, "Broadcast the username to partner")
 	var port = flag.Uint("port", 8080, "Set Port for TCP Socket [For running over network, this port will be forwarded by UPnP]")
 	var desc = flag.String("desc", "Say App", "Description for port forwarding [Ignored for running locally]")
@@ -21,6 +22,7 @@ func main() {
 		Name:            *name,
 		BroadcastName:   *hidden,
 		IsLocal:         *isLocal,
+		IsHost:          *isHost,
 		Port:            uint16(*port),
 		PortDescription: *desc,
 	}
@@ -29,6 +31,7 @@ func main() {
 
 	var app, err = say.CreateChatApp(&appConfig)
 	if err != nil {
+		fmt.Println(err.Error())
 		os.Exit(-1)
 	}
 
