@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
 	say "say/src"
+	"syscall"
 )
 
 func main() {
@@ -34,6 +37,15 @@ func main() {
 		fmt.Println(err.Error())
 		os.Exit(-1)
 	}
+
+	termChan := make(chan os.Signal)
+	signal.Notify(termChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-termChan
+		log.Print("Ctrl-C shutting down...\n")
+		app.Clean()
+		os.Exit(0)
+	}()
 
 	app.Run()
 
