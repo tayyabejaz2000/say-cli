@@ -2,15 +2,18 @@ package forwarding
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"math/big"
+	"net"
 	"time"
 
 	upnp "gitlab.com/NebulousLabs/go-upnp"
 )
 
 type Device struct {
-	PublicIP      string
-	ForwardedPort uint16
+	PublicIP      net.IP `json:"public_ip,omitempty"`
+	ForwardedPort uint16 `json:"forwarded_port,omitempty"`
 
 	upnpDevice *upnp.IGD
 }
@@ -27,19 +30,31 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 		return nil, errors.New("error forwarding port")
 	}
 	ip, err := igd.ExternalIP()
+
 	if err != nil {
 		return &Device{
-			PublicIP:      "",
+			PublicIP:      nil,
 			ForwardedPort: port,
 			upnpDevice:    igd,
 		}, errors.New("error retrieving public ip for device")
 	}
 
 	return &Device{
-		PublicIP:      ip,
+		PublicIP:      net.ParseIP(ip),
 		ForwardedPort: port,
 		upnpDevice:    igd,
 	}, nil
+}
+
+func (d *Device) GetCoded() string {
+	var ip2int = func(ip net.IP) uint32 {
+		if len(ip) == 16 {
+			return binary.BigEndian.Uint32(ip[12:16])
+		}
+		return binary.BigEndian.Uint32(ip)
+	}
+
+	return big.NewInt(int64(ip2int(d.PublicIP))).Text(62) + "-" + big.NewInt(int64(d.ForwardedPort)).Text(62)
 }
 
 func (d *Device) Close() error {

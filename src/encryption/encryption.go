@@ -7,7 +7,7 @@ import (
 )
 
 type KeyPair struct {
-	PublicKey  *rsa.PublicKey
+	PublicKey  *rsa.PublicKey `json:"public_key"`
 	privateKey *rsa.PrivateKey
 }
 

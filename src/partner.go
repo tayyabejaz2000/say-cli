@@ -5,11 +5,15 @@ import (
 	"crypto/rsa"
 	"errors"
 	"math/big"
+	"net"
 )
 
 type partner struct {
-	Name      string
-	PublicKey *rsa.PublicKey
+	Name      string         `json:"name"`
+	PublicKey *rsa.PublicKey `json:"public_key"`
+
+	IP   net.IP `json:"ip"`
+	Port uint16 `json:"port"`
 }
 
 func CreatePartner(name string, publicKey_E int, publicKey_N *big.Int) *partner {
@@ -17,6 +21,7 @@ func CreatePartner(name string, publicKey_E int, publicKey_N *big.Int) *partner 
 		E: publicKey_E,
 		N: publicKey_N,
 	}
+	//TODO: Add IP and Port as arguments, decode the code from host to get IP and Port
 	return &partner{
 		Name:      name,
 		PublicKey: &publicKey,

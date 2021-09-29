@@ -2,6 +2,7 @@ package say
 
 import (
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"say/src/encryption"
@@ -21,10 +22,10 @@ type Config struct {
 }
 
 type chatapp struct {
-	RSAKeyPair *encryption.KeyPair
-	Device     *forwarding.Device
-	AppConfig  *Config
-	Other      *partner
+	RSAKeyPair *encryption.KeyPair `json:"rsa_key_pair"`
+	Device     *forwarding.Device  `json:"device"`
+	AppConfig  *Config             `json:"app_config"`
+	Other      *partner            `json:"other"`
 }
 
 func CreateChatApp(config *Config) (*chatapp, error) {
@@ -37,6 +38,7 @@ func CreateChatApp(config *Config) (*chatapp, error) {
 		var createdDevice, err = forwarding.CreateDevice(port, description)
 		//Run in local is Port Forwarding failed
 		if err != nil {
+			log.Panicln(err.Error())
 			config.IsLocal = true
 			//Close the port if it was already open
 			if createdDevice != nil {
@@ -67,6 +69,7 @@ func (c *chatapp) runHost() {
 	if err != nil {
 		fmt.Printf("[Error: %s]: Error opening TCP socket\n", err.Error())
 	}
+
 	//Accept Client Connection
 	conn, err := listener.Accept()
 	if err != nil {
@@ -179,7 +182,7 @@ func (c *chatapp) runClient() {
 	c.Other = CreatePartner(string(hostName), publicKey_E, publicKey_N)
 
 	/*
-		TODO: Add Chat
+	   TODO: Add Chat
 	*/
 
 	//Close host connection
@@ -190,12 +193,17 @@ func (c *chatapp) runClient() {
 }
 
 func (c *chatapp) Run() {
+	if !c.AppConfig.IsLocal {
+		//Use this code for connection between host-client
+		fmt.Printf("Your Code: %v\n", c.Device.GetCoded())
+	}
+
 	if c.AppConfig.IsHost {
 		c.runHost()
 	} else {
 		c.runClient()
 	}
-	fmt.Println(*c)
+	fmt.Println(c)
 }
 
 func (c *chatapp) Clean() {
