@@ -35,7 +35,7 @@ func (k *KeyPair) RSAEncrypt(blob []byte) ([]byte, error) {
 func (k *KeyPair) RSADecrypt(encrypted []byte) ([]byte, error) {
 	var decrypted, err = rsa.DecryptPKCS1v15(rand.Reader, k.privateKey, encrypted)
 	if err != nil {
-		return nil, errors.New("error encrypting message")
+		return nil, errors.New("error decrypting message")
 	}
 	return decrypted, nil
 }

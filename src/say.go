@@ -1,7 +1,10 @@
 package say
 
 import (
+	"bufio"
+	"crypto/rsa"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
@@ -10,7 +13,6 @@ import (
 	"os/signal"
 	"say/src/encryption"
 	"say/src/forwarding"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -32,13 +34,22 @@ type chatapp struct {
 	Other      *partner            `json:"other"`
 }
 
+type DataHeader struct {
+	Name      string        `json:"name"`
+	PublicKey rsa.PublicKey `json:"public_key"`
+}
+
+type Message struct {
+	EncryptedData []byte `json:"encrypted_data"`
+}
+
 func CreateChatApp(config *Config) *chatapp {
 	var port = config.Port
 	var description = config.PortDescription
 	var device *forwarding.Device = nil
 
-	//Forward Port by UPnP if not running in Local
-	if !config.IsLocal {
+	//Forward Port by UPnP if not running in Local and this is the host app
+	if !config.IsLocal && config.IsHost {
 		var createdDevice, err = forwarding.CreateDevice(port, description)
 		//Run in local is Port Forwarding failed
 		if err != nil {
@@ -95,67 +106,43 @@ func (c *chatapp) runHost() {
 	if err != nil {
 		log.Panicf("[Error: %s]: Error opening TCP socket\n", err.Error())
 	}
-
+	defer listener.Close()
 	//Accept Client Connection
 	conn, err := listener.Accept()
 	if err != nil {
 		log.Panicf("[Error: %s]: Error accepting client connection\n", err.Error())
 	}
+	defer conn.Close()
 
-	//Exchange Names
+	var connReader = bufio.NewReader(conn)
+
+	//Send host data to client
 	var name = "Host"
 	if c.AppConfig.BroadcastName {
 		name = c.AppConfig.Name
 	}
-	_, err = conn.Write([]byte(name)) //Send host name to client
-	if err != nil {
-		log.Printf("[Warning: %s]: Error sending host name\n", err.Error())
-	}
-	var clientName = make([]byte, 50)
-	_, err = conn.Read(clientName) //Read client name from client
-	if err != nil {
-		log.Printf("[Warning: %s]: Error receiving client name\n", err.Error())
-		copy(clientName, "client")
-	}
+	jsonData, _ := json.Marshal(DataHeader{name, *c.RSAKeyPair.PublicKey})
+	_, err = conn.Write(append(jsonData, 0))
 
-	//Exchange Public Keys
-	var hostPublicKey = c.RSAKeyPair.PublicKey
-	var keyBlob = []byte(fmt.Sprintf("%s,%d", hostPublicKey.N.String(), hostPublicKey.E))
-	_, err = conn.Write(keyBlob) //Send host public key to client
 	if err != nil {
-		log.Panicf("[Error: %s]: Error sending host public key\n", err.Error())
+		log.Panicf("[Error: %s]: Error sending data to client\n", err.Error())
 	}
-	var clientKey = make([]byte, 1000)
-	_, err = conn.Read(clientKey) //Read client public key from client
+	//Read client data from client
+	data, err := connReader.ReadBytes(0)
 	if err != nil {
-		log.Panicf("[Error: %s]: Error receiving client public key\n", err.Error())
+		log.Panicf("[Error: %s]: Error recieving data from client\n", err.Error())
 	}
-	//Split public key components
-	var clientPublicKey = strings.Split(string(clientKey), ",")
+	var clientData DataHeader
+	json.Unmarshal(data[:len(data)-1], &clientData)
+	c.Other = CreatePartner(clientData.Name, clientData.PublicKey)
 
-	//Delete Buffers
-	keyBlob = nil
-	clientKey = nil
-	clientName = nil
-
-	publicKey_N, _ := new(big.Int).SetString(clientPublicKey[0], 10)
-	publicKey_E, _ := strconv.Atoi(clientPublicKey[1])
-	//Fill partner data
-	c.Other = CreatePartner(string(clientName), publicKey_E, publicKey_N)
-
-	/*
-		TODO: Add Chat
-	*/
-
-	//Close Client Connection
-	err = conn.Close()
+	//Chatting can begin
+	var message = []byte("This is very secret message")
+	encrypted, _ := c.Other.EncryptMessage(message)
+	jsonData, _ = json.Marshal(Message{encrypted})
+	_, err = conn.Write(append(jsonData, 0))
 	if err != nil {
-		log.Printf("[Warning: %s]: Failed closing connection to client\n", err.Error())
-	}
-	//Close TCP Socket
-	err = listener.Close()
-	if err != nil {
-		log.Printf("[Warning: %s]: Failed closing host connection\n", err.Error())
+		log.Printf("[Warning: %s]: Failed to send data to client\n", err.Error())
 	}
 }
 
@@ -164,60 +151,39 @@ func (c *chatapp) runClient() {
 	if err != nil {
 		log.Panicf("[Error: %s]: Error connecting to host\n", err.Error())
 	}
+	defer conn.Close()
 
-	//Exchange Names
-	var hostName = make([]byte, 50)
-	_, err = conn.Read(hostName) //Read host name from host
+	var connReader = bufio.NewReader(conn)
+
+	//Recieve host data from host
+	data, err := connReader.ReadBytes(0)
 	if err != nil {
-		log.Printf("[Warning: %s]: Failed to recieve host name\n", err.Error())
-		copy(hostName, "host")
+		log.Panicf("[Error: %s]: Error recieving data from host\n", err.Error())
 	}
+	var hostData DataHeader
+	json.Unmarshal(data[:len(data)-1], &hostData)
+	c.Other = CreatePartner(hostData.Name, hostData.PublicKey)
 
+	//Send client data to host
 	var name = "Client"
 	if c.AppConfig.BroadcastName {
 		name = c.AppConfig.Name
 	}
-	_, err = conn.Write([]byte(name)) //Send client name to host
+	jsonData, _ := json.Marshal(DataHeader{name, *c.RSAKeyPair.PublicKey})
+	_, err = conn.Write(append(jsonData, 0))
 	if err != nil {
-		log.Printf("[Warning: %s]: Failed to send client name\n", err.Error())
+		log.Panicf("[Error: %s]: Error sending data to host\n", err.Error())
 	}
 
-	//Exchange public keys
-	var hostKey = make([]byte, 1000)
-	_, err = conn.Read(hostKey) //Read host public key from host
+	//Chatting can begin
+	jsonData, err = connReader.ReadBytes(0)
 	if err != nil {
-		log.Panicf("[Error: %s]: Error receiving host public key\n", err.Error())
+		log.Printf("[Warning: %s]: Failed to recieve message from host\n", err.Error())
 	}
-
-	var clientPubicKey = c.RSAKeyPair.PublicKey
-	var keyBlob = []byte(fmt.Sprintf("%s,%d", clientPubicKey.N.String(), clientPubicKey.E))
-
-	_, err = conn.Write(keyBlob) //Send client public key to host
-	if err != nil {
-		log.Panicf("[Error: %s]: Error sending client public key\n", err.Error())
-	}
-	//Split public key components
-	var hostPublicKey = strings.Split(string(hostKey), ",")
-
-	//Delete Buffers
-	keyBlob = nil
-	hostKey = nil
-	hostName = nil
-
-	publicKey_N, _ := new(big.Int).SetString(hostPublicKey[0], 10)
-	publicKey_E, _ := strconv.Atoi(hostPublicKey[1])
-	//Fill partner data
-	c.Other = CreatePartner(string(hostName), publicKey_E, publicKey_N)
-
-	/*
-	   TODO: Add Chat
-	*/
-
-	//Close host connection
-	err = conn.Close()
-	if err != nil {
-		log.Printf("[Warning: %s]: Failed to close connection to host\n", err.Error())
-	}
+	var message Message
+	json.Unmarshal(jsonData[:len(jsonData)-1], &message)
+	decrypted, _ := c.RSAKeyPair.RSADecrypt(message.EncryptedData)
+	fmt.Printf("Message: %v\n", string(decrypted))
 }
 
 func (c *chatapp) Run() {

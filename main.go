@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
-	"fmt"
 	"os"
 	say "say/src"
 )
@@ -26,15 +24,12 @@ func main() {
 
 	var appConfig = say.Config{
 		Name:            *name,
-		BroadcastName:   *hidden,
+		BroadcastName:   !*hidden,
 		IsLocal:         *isLocal,
 		IsHost:          *isHost,
 		Port:            uint16(*port),
 		PortDescription: *desc,
 	}
-	var json, _ = json.Marshal(appConfig)
-	fmt.Println(string(json))
-
 	var app = say.CreateChatApp(&appConfig)
 
 	app.Run()
