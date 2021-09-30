@@ -2,9 +2,7 @@ package forwarding
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
-	"math/big"
 	"net"
 	"time"
 
@@ -29,8 +27,8 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 	if err != nil {
 		return nil, errors.New("error forwarding port")
 	}
-	ip, err := igd.ExternalIP()
 
+	ip, err := igd.ExternalIP()
 	if err != nil {
 		return &Device{
 			PublicIP:      nil,
@@ -44,17 +42,6 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 		ForwardedPort: port,
 		upnpDevice:    igd,
 	}, nil
-}
-
-func (d *Device) GetCoded() string {
-	var ip2int = func(ip net.IP) uint32 {
-		if len(ip) == 16 {
-			return binary.BigEndian.Uint32(ip[12:16])
-		}
-		return binary.BigEndian.Uint32(ip)
-	}
-
-	return big.NewInt(int64(ip2int(d.PublicIP))).Text(62) + "-" + big.NewInt(int64(d.ForwardedPort)).Text(62)
 }
 
 func (d *Device) Close() error {

@@ -1,14 +1,18 @@
 package say
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"math/big"
 	"net"
+	"os"
+	"os/signal"
 	"say/src/encryption"
 	"say/src/forwarding"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 ///TODO: (bool)Read Key Value Pair from cert/file
@@ -28,7 +32,7 @@ type chatapp struct {
 	Other      *partner            `json:"other"`
 }
 
-func CreateChatApp(config *Config) (*chatapp, error) {
+func CreateChatApp(config *Config) *chatapp {
 	var port = config.Port
 	var description = config.PortDescription
 	var device *forwarding.Device = nil
@@ -38,7 +42,7 @@ func CreateChatApp(config *Config) (*chatapp, error) {
 		var createdDevice, err = forwarding.CreateDevice(port, description)
 		//Run in local is Port Forwarding failed
 		if err != nil {
-			log.Panicln(err.Error())
+			log.Printf("[Warning: %s]: Couldn't forward port, running in local mode\n", err.Error())
 			config.IsLocal = true
 			//Close the port if it was already open
 			if createdDevice != nil {
@@ -52,28 +56,50 @@ func CreateChatApp(config *Config) (*chatapp, error) {
 	//Can do it once both parties join
 	var keyPair, err = encryption.GenerateKeyPair()
 	if err != nil {
-		return nil, err
+		log.Panicf("[Error: %s]: Error generating RSA Key Pair\n", err.Error())
 	}
 
-	return &chatapp{
+	var app = &chatapp{
 		RSAKeyPair: keyPair,
 		Device:     device,
 		AppConfig:  config,
 		Other:      nil,
-	}, nil
+	}
+
+	termChan := make(chan os.Signal)
+	signal.Notify(termChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-termChan
+		log.Print("[Info]: Ctrl-C shutting down...\n")
+		app.Clean()
+		os.Exit(0)
+	}()
+
+	return app
+}
+
+func getCode(IP net.IP, port uint16) string {
+	var ip2int = func(ip net.IP) uint32 {
+		if len(ip) == 16 {
+			return binary.BigEndian.Uint32(ip[12:16])
+		}
+		return binary.BigEndian.Uint32(ip)
+	}
+
+	return big.NewInt(int64(ip2int(IP))).Text(62) + "-" + big.NewInt(int64(port)).Text(62)
 }
 
 func (c *chatapp) runHost() {
 	//Open TCP Socket
 	var listener, err = net.Listen("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", c.AppConfig.Port))
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error opening TCP socket\n", err.Error())
+		log.Panicf("[Error: %s]: Error opening TCP socket\n", err.Error())
 	}
 
 	//Accept Client Connection
 	conn, err := listener.Accept()
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error accepting client connection\n", err.Error())
+		log.Panicf("[Error: %s]: Error accepting client connection\n", err.Error())
 	}
 
 	//Exchange Names
@@ -83,12 +109,13 @@ func (c *chatapp) runHost() {
 	}
 	_, err = conn.Write([]byte(name)) //Send host name to client
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error sending host name\n", err.Error())
+		log.Printf("[Warning: %s]: Error sending host name\n", err.Error())
 	}
 	var clientName = make([]byte, 50)
 	_, err = conn.Read(clientName) //Read client name from client
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error receiving client name\n", err.Error())
+		log.Printf("[Warning: %s]: Error receiving client name\n", err.Error())
+		copy(clientName, "client")
 	}
 
 	//Exchange Public Keys
@@ -96,12 +123,12 @@ func (c *chatapp) runHost() {
 	var keyBlob = []byte(fmt.Sprintf("%s,%d", hostPublicKey.N.String(), hostPublicKey.E))
 	_, err = conn.Write(keyBlob) //Send host public key to client
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error sending host public key\n", err.Error())
+		log.Panicf("[Error: %s]: Error sending host public key\n", err.Error())
 	}
 	var clientKey = make([]byte, 1000)
 	_, err = conn.Read(clientKey) //Read client public key from client
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error receiving client public key\n", err.Error())
+		log.Panicf("[Error: %s]: Error receiving client public key\n", err.Error())
 	}
 	//Split public key components
 	var clientPublicKey = strings.Split(string(clientKey), ",")
@@ -123,26 +150,27 @@ func (c *chatapp) runHost() {
 	//Close Client Connection
 	err = conn.Close()
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error closing connection to client\n", err.Error())
+		log.Printf("[Warning: %s]: Failed closing connection to client\n", err.Error())
 	}
 	//Close TCP Socket
 	err = listener.Close()
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error closing host connection\n", err.Error())
+		log.Printf("[Warning: %s]: Failed closing host connection\n", err.Error())
 	}
 }
 
 func (c *chatapp) runClient() {
 	var conn, err = net.Dial("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", c.AppConfig.Port))
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error connecting to host\n", err.Error())
+		log.Panicf("[Error: %s]: Error connecting to host\n", err.Error())
 	}
 
 	//Exchange Names
 	var hostName = make([]byte, 50)
 	_, err = conn.Read(hostName) //Read host name from host
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error receiving host name\n", err.Error())
+		log.Printf("[Warning: %s]: Failed to recieve host name\n", err.Error())
+		copy(hostName, "host")
 	}
 
 	var name = "Client"
@@ -151,14 +179,14 @@ func (c *chatapp) runClient() {
 	}
 	_, err = conn.Write([]byte(name)) //Send client name to host
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error sending client name\n", err.Error())
+		log.Printf("[Warning: %s]: Failed to send client name\n", err.Error())
 	}
 
 	//Exchange public keys
 	var hostKey = make([]byte, 1000)
 	_, err = conn.Read(hostKey) //Read host public key from host
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error receiving host public key\n", err.Error())
+		log.Panicf("[Error: %s]: Error receiving host public key\n", err.Error())
 	}
 
 	var clientPubicKey = c.RSAKeyPair.PublicKey
@@ -166,7 +194,7 @@ func (c *chatapp) runClient() {
 
 	_, err = conn.Write(keyBlob) //Send client public key to host
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error sending client public key\n", err.Error())
+		log.Panicf("[Error: %s]: Error sending client public key\n", err.Error())
 	}
 	//Split public key components
 	var hostPublicKey = strings.Split(string(hostKey), ",")
@@ -188,29 +216,38 @@ func (c *chatapp) runClient() {
 	//Close host connection
 	err = conn.Close()
 	if err != nil {
-		fmt.Printf("[Error: %s]: Error closing connection to host\n", err.Error())
+		log.Printf("[Warning: %s]: Failed to close connection to host\n", err.Error())
 	}
 }
 
 func (c *chatapp) Run() {
-	if !c.AppConfig.IsLocal {
-		//Use this code for connection between host-client
-		fmt.Printf("Your Code: %v\n", c.Device.GetCoded())
-	}
-
 	if c.AppConfig.IsHost {
+		if !c.AppConfig.IsLocal {
+			//Use this code for connection between host-client
+			log.Printf("Your Code: %v\n", getCode(c.Device.PublicIP, c.Device.ForwardedPort))
+		} else {
+			var localIP = net.ParseIP("127.0.0.1")
+			var localConn, err = net.Dial("udp", "1.1.1.1:80")
+			if err != nil {
+				//Can be a panic wont allow running if not connected to internet
+				log.Printf("[Warning: %s]: You are not connected to internet", err.Error())
+			} else {
+				localIP = net.ParseIP(strings.Split(localConn.LocalAddr().String(), ":")[0])
+				localConn.Close()
+			}
+			log.Printf("Your Code: %v\n", getCode(localIP, c.AppConfig.Port))
+		}
 		c.runHost()
 	} else {
 		c.runClient()
 	}
-	fmt.Println(c)
 }
 
 func (c *chatapp) Clean() {
 	if c.Device != nil {
 		var err = c.Device.Close()
 		if err != nil {
-			fmt.Printf("[Error: %s]: Error closing\n", err.Error())
+			log.Printf("[Warning: %s]: Failed to close forwarded port\n", err.Error())
 		}
 	}
 }

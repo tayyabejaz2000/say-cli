@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
-	"os/signal"
 	say "say/src"
-	"syscall"
 )
 
 func main() {
@@ -22,7 +19,7 @@ func main() {
 	var help = flag.Bool("help", false, "Display Help Page")
 	flag.Parse()
 
-	if *help || len(flag.Args()) == 0 {
+	if *help || len(os.Args) < 2 {
 		flag.Usage()
 		return
 	}
@@ -38,19 +35,7 @@ func main() {
 	var json, _ = json.Marshal(appConfig)
 	fmt.Println(string(json))
 
-	var app, err = say.CreateChatApp(&appConfig)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-
-	termChan := make(chan os.Signal)
-	signal.Notify(termChan, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		<-termChan
-		log.Print("Ctrl-C shutting down...\n")
-		app.Clean()
-		os.Exit(0)
-	}()
+	var app = say.CreateChatApp(&appConfig)
 
 	app.Run()
 
