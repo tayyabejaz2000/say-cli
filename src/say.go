@@ -147,7 +147,18 @@ func (c *chatapp) runHost() {
 }
 
 func (c *chatapp) runClient() {
-	var conn, err = net.Dial("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", c.AppConfig.Port))
+	fmt.Print("Enter Code: ")
+	var code string
+	fmt.Scanln(&code)
+	var codeParts = strings.Split(code, "-")
+	var codedIP, _ = new(big.Int).SetString(codeParts[0], 62)
+	var ip net.IP = net.IPv4(0, 0, 0, 0)
+	binary.BigEndian.PutUint32(ip[12:16], uint32(codedIP.Uint64()))
+
+	var codedPort, _ = new(big.Int).SetString(codeParts[1], 62)
+	var port = codedPort.Uint64()
+
+	var conn, err = net.Dial("tcp4", fmt.Sprintf("%s:%d", ip.String(), port))
 	if err != nil {
 		log.Panicf("[Error: %s]: Error connecting to host\n", err.Error())
 	}

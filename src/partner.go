@@ -3,7 +3,6 @@ package say
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"errors"
 	"net"
 )
 
@@ -26,7 +25,7 @@ func CreatePartner(name string, publicKey rsa.PublicKey) *partner {
 func (p *partner) EncryptMessage(message []byte) ([]byte, error) {
 	var encrypted, err = rsa.EncryptPKCS1v15(rand.Reader, p.PublicKey, message)
 	if err != nil {
-		return nil, errors.New("error encrypting message")
+		return nil, err
 	}
 	return encrypted, nil
 }

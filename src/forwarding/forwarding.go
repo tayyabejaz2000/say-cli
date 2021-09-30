@@ -2,7 +2,6 @@ package forwarding
 
 import (
 	"context"
-	"errors"
 	"net"
 	"time"
 
@@ -21,11 +20,11 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 	defer cancel()
 	var igd, err = upnp.DiscoverCtx(ctx)
 	if err != nil {
-		return nil, errors.New("error initializing upnp device")
+		return nil, err
 	}
 	err = igd.Forward(port, description)
 	if err != nil {
-		return nil, errors.New("error forwarding port")
+		return nil, err
 	}
 
 	ip, err := igd.ExternalIP()
@@ -34,7 +33,7 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 			PublicIP:      nil,
 			ForwardedPort: port,
 			upnpDevice:    igd,
-		}, errors.New("error retrieving public ip for device")
+		}, err
 	}
 
 	return &Device{
@@ -47,7 +46,7 @@ func CreateDevice(port uint16, description string) (*Device, error) {
 func (d *Device) Close() error {
 	var err = d.upnpDevice.Clear(uint16(d.ForwardedPort))
 	if err != nil {
-		return errors.New("error removing forwarded port")
+		return err
 	}
 	return nil
 }
