@@ -3,15 +3,11 @@ package say
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"net"
 )
 
 type partner struct {
 	Name      string         `json:"name"`
 	PublicKey *rsa.PublicKey `json:"public_key"`
-
-	IP   net.IP `json:"ip"`
-	Port uint16 `json:"port"`
 }
 
 func CreatePartner(name string, publicKey rsa.PublicKey) *partner {

@@ -1,7 +1,6 @@
 package say
 
 import (
-	"bufio"
 	"crypto/rsa"
 	"encoding/binary"
 	"encoding/json"
@@ -37,10 +36,6 @@ type chatapp struct {
 type DataHeader struct {
 	Name      string        `json:"name"`
 	PublicKey rsa.PublicKey `json:"public_key"`
-}
-
-type Message struct {
-	EncryptedData []byte `json:"encrypted_data"`
 }
 
 func CreateChatApp(config *Config) *chatapp {
@@ -114,35 +109,33 @@ func (c *chatapp) runHost() {
 	}
 	defer conn.Close()
 
-	var connReader = bufio.NewReader(conn)
+	var connWriter = json.NewEncoder(conn)
+	var connReader = json.NewDecoder(conn)
 
 	//Send host data to client
 	var name = "Host"
 	if c.AppConfig.BroadcastName {
 		name = c.AppConfig.Name
 	}
-	jsonData, _ := json.Marshal(DataHeader{name, *c.RSAKeyPair.PublicKey})
-	_, err = conn.Write(append(jsonData, 0))
-
+	err = connWriter.Encode(DataHeader{name, *c.RSAKeyPair.PublicKey})
 	if err != nil {
 		log.Panicf("[Error: %s]: Error sending data to client\n", err.Error())
 	}
+
 	//Read client data from client
-	data, err := connReader.ReadBytes(0)
+	var clientData DataHeader
+	err = connReader.Decode(&clientData)
 	if err != nil {
 		log.Panicf("[Error: %s]: Error recieving data from client\n", err.Error())
 	}
-	var clientData DataHeader
-	json.Unmarshal(data[:len(data)-1], &clientData)
 	c.Other = CreatePartner(clientData.Name, clientData.PublicKey)
 
 	//Chatting can begin
-	var message = []byte("This is very secret message")
-	encrypted, _ := c.Other.EncryptMessage(message)
-	jsonData, _ = json.Marshal(Message{encrypted})
-	_, err = conn.Write(append(jsonData, 0))
+	var message = "Hello World"
+	encrypted, _ := c.Other.EncryptMessage([]byte(message))
+	err = connWriter.Encode(Message{encrypted})
 	if err != nil {
-		log.Printf("[Warning: %s]: Failed to send data to client\n", err.Error())
+		log.Printf("[Error: %s]: Error sending message to client\n", err.Error())
 	}
 }
 
@@ -164,15 +157,15 @@ func (c *chatapp) runClient() {
 	}
 	defer conn.Close()
 
-	var connReader = bufio.NewReader(conn)
+	var connWriter = json.NewEncoder(conn)
+	var connReader = json.NewDecoder(conn)
 
 	//Recieve host data from host
-	data, err := connReader.ReadBytes(0)
+	var hostData DataHeader
+	err = connReader.Decode(&hostData)
 	if err != nil {
 		log.Panicf("[Error: %s]: Error recieving data from host\n", err.Error())
 	}
-	var hostData DataHeader
-	json.Unmarshal(data[:len(data)-1], &hostData)
 	c.Other = CreatePartner(hostData.Name, hostData.PublicKey)
 
 	//Send client data to host
@@ -180,19 +173,17 @@ func (c *chatapp) runClient() {
 	if c.AppConfig.BroadcastName {
 		name = c.AppConfig.Name
 	}
-	jsonData, _ := json.Marshal(DataHeader{name, *c.RSAKeyPair.PublicKey})
-	_, err = conn.Write(append(jsonData, 0))
+	err = connWriter.Encode(DataHeader{name, *c.RSAKeyPair.PublicKey})
 	if err != nil {
 		log.Panicf("[Error: %s]: Error sending data to host\n", err.Error())
 	}
 
 	//Chatting can begin
-	jsonData, err = connReader.ReadBytes(0)
-	if err != nil {
-		log.Printf("[Warning: %s]: Failed to recieve message from host\n", err.Error())
-	}
 	var message Message
-	json.Unmarshal(jsonData[:len(jsonData)-1], &message)
+	err = connReader.Decode(&message)
+	if err != nil {
+		log.Printf("[Error: %s]: Error receiving message from host\n", err.Error())
+	}
 	decrypted, _ := c.RSAKeyPair.RSADecrypt(message.EncryptedData)
 	fmt.Printf("Message: %v\n", string(decrypted))
 }
@@ -206,8 +197,8 @@ func (c *chatapp) Run() {
 			var localIP = net.ParseIP("127.0.0.1")
 			var localConn, err = net.Dial("udp", "1.1.1.1:80")
 			if err != nil {
-				//Can be a panic wont allow running if not connected to internet
-				log.Printf("[Warning: %s]: You are not connected to internet", err.Error())
+				//Can be a panic wont allow running if not connected to a network
+				log.Printf("[Warning: %s]: You are not connected to a network", err.Error())
 			} else {
 				localIP = net.ParseIP(strings.Split(localConn.LocalAddr().String(), ":")[0])
 				localConn.Close()
