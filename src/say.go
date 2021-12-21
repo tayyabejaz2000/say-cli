@@ -28,10 +28,10 @@ type Config struct {
 }
 
 type chatapp struct {
-	Device    *forwarding.Device  `json:"device,omitempty"`
-	AppConfig *Config             `json:"app_config,omitempty"`
-	KeyPair   *encryption.KeyPair `json:"key_pair,omitempty"`
-	AESKey    *encryption.AESKey  `json:"encryption_key,omitempty"`
+	Device    *forwarding.Device
+	AppConfig *Config
+	KeyPair   *encryption.KeyPair
+	AESKey    *encryption.AESKey
 }
 
 type HandshakeMessage1 struct {
@@ -76,6 +76,12 @@ func CreateChatApp(config *Config) *chatapp {
 			log.Panicf("[Error: %s]: Error generating AES Key\n", err.Error())
 		}
 	}
+
+	logFile, err := os.OpenFile("say.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Printf("[Warning: %s]: Failed to create/open Log File\n", err.Error())
+	}
+	log.SetOutput(logFile)
 
 	var app = &chatapp{
 		Device:    device,
@@ -159,6 +165,7 @@ func (c *chatapp) runHost() {
 		if err != nil {
 			log.Panicf("[Error: %s]: Error sending encrypted Message to client\n", err.Error())
 		}
+		log.Printf("[Message]: (%s) %s\n", hostData.Name, message)
 	})
 	go ui.Run(c.Clean)
 
@@ -175,6 +182,7 @@ func (c *chatapp) runHost() {
 		}
 		var decryptedMessage = c.AESKey.Decrypt(msg.EncryptedData)
 		ui.AddMessage(clientData.Name, string(decryptedMessage))
+		log.Printf("[Message]: (%s) %s\n", clientData.Name, strings.Trim(string(decryptedMessage), string([]byte{0, ' '})))
 	}
 }
 
@@ -239,6 +247,7 @@ func (c *chatapp) runClient() {
 		if err != nil {
 			log.Panicf("[Error: %s]: Error sending encrypted Message to client\n", err.Error())
 		}
+		log.Printf("[Message]: (%s) %s\n", clientData.Name, message)
 	})
 	go ui.Run(c.Clean)
 
@@ -255,14 +264,20 @@ func (c *chatapp) runClient() {
 		}
 		var decryptedMessage = c.AESKey.Decrypt(msg.EncryptedData)
 		ui.AddMessage(hostData.Name, string(decryptedMessage))
+
+		log.Printf("[Message]: (%s) %s\n", hostData.Name, strings.Trim(string(decryptedMessage), string([]byte{0, ' '})))
 	}
 }
 
 func (c *chatapp) Run() {
+	config, _ := json.Marshal(c.AppConfig)
+	log.Printf("[Info]: Config %s\n", string(config))
 	if c.AppConfig.IsHost {
 		if !c.AppConfig.IsLocal {
 			//Use this code for connection between host-client
-			log.Printf("Your Code: %v\n", getCode(c.Device.PublicIP, c.Device.ForwardedPort))
+			code := getCode(c.Device.PublicIP, c.Device.ForwardedPort)
+			fmt.Printf("Connection Code: %v\n", code)
+			log.Printf("[Info]: Connection Code: %v\n", code)
 		} else {
 			var localIP = net.ParseIP("127.0.0.1")
 			var localConn, err = net.Dial("udp", "1.1.1.1:80")
@@ -273,7 +288,9 @@ func (c *chatapp) Run() {
 				localIP = net.ParseIP(strings.Split(localConn.LocalAddr().String(), ":")[0])
 				localConn.Close()
 			}
-			log.Printf("Your Code: %v\n", getCode(localIP, c.AppConfig.Port))
+			code := getCode(localIP, c.AppConfig.Port)
+			fmt.Printf("Connection Code: %v\n", code)
+			log.Printf("[Info]: Connection Code: %v\n", code)
 		}
 		c.runHost()
 	} else {

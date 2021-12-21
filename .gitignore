@@ -16,3 +16,4 @@
 
 #say specific .gitignore
 say
+*.log
