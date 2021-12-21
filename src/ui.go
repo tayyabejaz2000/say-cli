@@ -40,7 +40,9 @@ func CreateUI(appConfig *Config, inputCallback func(string)) *UI {
 		input.SetText("")
 	})
 
-	inputBox := tui.NewHBox(input)
+	name := tui.NewLabel(appConfig.Name + "> ")
+
+	inputBox := tui.NewHBox(name, input)
 	inputBox.SetBorder(true)
 	inputBox.SetSizePolicy(tui.Expanding, tui.Maximum)
 
