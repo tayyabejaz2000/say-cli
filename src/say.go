@@ -80,8 +80,9 @@ func CreateChatApp(config *Config) *chatapp {
 	logFile, err := os.OpenFile("say.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Printf("[Warning: %s]: Failed to create/open Log File\n", err.Error())
+	} else {
+		log.SetOutput(logFile)
 	}
-	log.SetOutput(logFile)
 
 	var app = &chatapp{
 		Device:    device,
