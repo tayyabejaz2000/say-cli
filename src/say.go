@@ -2,6 +2,7 @@ package say
 
 import (
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -27,22 +28,27 @@ type Config struct {
 }
 
 type chatapp struct {
-	RSAKeyPair *encryption.KeyPair `json:"rsa_key_pair"`
-	Device     *forwarding.Device  `json:"device"`
-	AppConfig  *Config             `json:"app_config"`
-	Other      *partner            `json:"other"`
+	Device    *forwarding.Device  `json:"device,omitempty"`
+	AppConfig *Config             `json:"app_config,omitempty"`
+	KeyPair   *encryption.KeyPair `json:"key_pair,omitempty"`
+	AESKey    *encryption.AESKey  `json:"encryption_key,omitempty"`
 }
 
-type DataHeader struct {
+type HandshakeMessage1 struct {
 	Name      string        `json:"name"`
 	PublicKey rsa.PublicKey `json:"public_key"`
+}
+
+type HandshakeMessage2 struct {
+	Name            string        `json:"name"`
+	PublicKey       rsa.PublicKey `json:"public_key"`
+	EncryptedAESKey []byte        `json:"encrypted_aes_key"`
 }
 
 func CreateChatApp(config *Config) *chatapp {
 	var port = config.Port
 	var description = config.PortDescription
 	var device *forwarding.Device = nil
-
 	//Forward Port by UPnP if not running in Local and this is the host app
 	if !config.IsLocal && config.IsHost {
 		var createdDevice, err = forwarding.CreateDevice(port, description)
@@ -58,18 +64,24 @@ func CreateChatApp(config *Config) *chatapp {
 			device = createdDevice
 		}
 	}
-
-	//Can do it once both parties join
-	var keyPair, err = encryption.GenerateKeyPair()
+	keyPair, err := encryption.GenerateKeyPair()
 	if err != nil {
 		log.Panicf("[Error: %s]: Error generating RSA Key Pair\n", err.Error())
 	}
+	var AESKey *encryption.AESKey = nil
+	if config.IsHost {
+		var err error
+		AESKey, err = encryption.GenerateAESKey()
+		if err != nil {
+			log.Panicf("[Error: %s]: Error generating AES Key\n", err.Error())
+		}
+	}
 
 	var app = &chatapp{
-		RSAKeyPair: keyPair,
-		Device:     device,
-		AppConfig:  config,
-		Other:      nil,
+		Device:    device,
+		AppConfig: config,
+		KeyPair:   keyPair,
+		AESKey:    AESKey,
 	}
 
 	termChan := make(chan os.Signal)
@@ -102,6 +114,7 @@ func (c *chatapp) runHost() {
 		log.Panicf("[Error: %s]: Error opening TCP socket\n", err.Error())
 	}
 	defer listener.Close()
+
 	//Accept Client Connection
 	conn, err := listener.Accept()
 	if err != nil {
@@ -112,30 +125,56 @@ func (c *chatapp) runHost() {
 	var connWriter = json.NewEncoder(conn)
 	var connReader = json.NewDecoder(conn)
 
-	//Send host data to client
-	var name = "Host"
-	if c.AppConfig.BroadcastName {
-		name = c.AppConfig.Name
-	}
-	err = connWriter.Encode(DataHeader{name, *c.RSAKeyPair.PublicKey})
-	if err != nil {
-		log.Panicf("[Error: %s]: Error sending data to client\n", err.Error())
-	}
-
-	//Read client data from client
-	var clientData DataHeader
+	var clientData HandshakeMessage1
 	err = connReader.Decode(&clientData)
 	if err != nil {
-		log.Panicf("[Error: %s]: Error recieving data from client\n", err.Error())
+		log.Panicf("[Error: %s]: Error reading RSA Public Key from client\n", err.Error())
 	}
-	c.Other = CreatePartner(clientData.Name, clientData.PublicKey)
-
-	//Chatting can begin
-	var message = "Hello World"
-	encrypted, _ := c.Other.EncryptMessage([]byte(message))
-	err = connWriter.Encode(Message{encrypted})
+	encryptedKey, err := c.AESKey.EncryptKeyByRSA(clientData.PublicKey)
 	if err != nil {
-		log.Printf("[Error: %s]: Error sending message to client\n", err.Error())
+		log.Panicf("[Error: %s]: Error encrypting AES Key\n", err.Error())
+	}
+	var hostData = &HandshakeMessage2{
+		Name:            c.AppConfig.Name,
+		PublicKey:       *c.KeyPair.PublicKey,
+		EncryptedAESKey: encryptedKey,
+	}
+	err = connWriter.Encode(hostData)
+	if err != nil {
+		log.Panicf("[Error: %s]: Error sending encrypted AES Key to client\n", err.Error())
+	}
+	log.Println("[Info]: Starting Chat UI...")
+	ui := CreateUI(c.AppConfig, func(message string) {
+		encrypted := c.AESKey.Encrypt([]byte(message))
+		shaHash := sha256.Sum256(encrypted)
+		sig, err := c.KeyPair.RSASign(shaHash[:])
+		if err != nil {
+			log.Panicf("[Error: %s]: Error Signing Message\n", err.Error())
+		}
+		var msg = Message{
+			EncryptedData: encrypted,
+			Signature:     sig,
+		}
+		err = connWriter.Encode(msg)
+		if err != nil {
+			log.Panicf("[Error: %s]: Error sending encrypted Message to client\n", err.Error())
+		}
+	})
+	go ui.Run(c.Clean)
+
+	for {
+		var msg Message
+		err = connReader.Decode(&msg)
+		if err != nil {
+			log.Panicf("[Error: %s]: Error parsing Message from client\n", err.Error())
+		}
+		shaHash := sha256.Sum256([]byte(msg.EncryptedData))
+		err = encryption.RSAVerify(&clientData.PublicKey, shaHash[:], msg.Signature)
+		if err != nil {
+			log.Panicf("[Error: %s]: Message Compromised, Digital Signature don't match\n", err.Error())
+		}
+		var decryptedMessage = c.AESKey.Decrypt(msg.EncryptedData)
+		ui.AddMessage(clientData.Name, string(decryptedMessage))
 	}
 }
 
@@ -160,32 +199,63 @@ func (c *chatapp) runClient() {
 	var connWriter = json.NewEncoder(conn)
 	var connReader = json.NewDecoder(conn)
 
-	//Recieve host data from host
-	var hostData DataHeader
+	var clientData = HandshakeMessage1{
+		Name:      c.AppConfig.Name,
+		PublicKey: *c.KeyPair.PublicKey,
+	}
+
+	err = connWriter.Encode(clientData)
+	if err != nil {
+		log.Panicf("[Error: %s]: Error sending Public Key to host\n", err.Error())
+	}
+
+	var hostData HandshakeMessage2
 	err = connReader.Decode(&hostData)
 	if err != nil {
-		log.Panicf("[Error: %s]: Error recieving data from host\n", err.Error())
+		log.Panicf("[Error: %s]: Error recieving AES Key from host\n", err.Error())
 	}
-	c.Other = CreatePartner(hostData.Name, hostData.PublicKey)
-
-	//Send client data to host
-	var name = "Client"
-	if c.AppConfig.BroadcastName {
-		name = c.AppConfig.Name
-	}
-	err = connWriter.Encode(DataHeader{name, *c.RSAKeyPair.PublicKey})
+	aesKey, err := c.KeyPair.RSADecrypt(hostData.EncryptedAESKey)
 	if err != nil {
-		log.Panicf("[Error: %s]: Error sending data to host\n", err.Error())
+		log.Panicf("[Error: %s]: Error decrypting AES Key\n", err.Error())
+	}
+	c.AESKey, err = encryption.CreateAESKey(aesKey)
+	if err != nil {
+		log.Panicf("[Error: %s]: Couldn't create AES Block Cipher\n", err.Error())
 	}
 
-	//Chatting can begin
-	var message Message
-	err = connReader.Decode(&message)
-	if err != nil {
-		log.Printf("[Error: %s]: Error receiving message from host\n", err.Error())
+	log.Println("[Info]: Starting Chat UI...")
+	ui := CreateUI(c.AppConfig, func(message string) {
+		encrypted := c.AESKey.Encrypt([]byte(message))
+		shaHash := sha256.Sum256(encrypted)
+		sig, err := c.KeyPair.RSASign(shaHash[:])
+		if err != nil {
+			log.Panicf("[Error: %s]: Error Signing Message\n", err.Error())
+		}
+		var msg = Message{
+			EncryptedData: encrypted,
+			Signature:     sig,
+		}
+		err = connWriter.Encode(msg)
+		if err != nil {
+			log.Panicf("[Error: %s]: Error sending encrypted Message to client\n", err.Error())
+		}
+	})
+	go ui.Run(c.Clean)
+
+	for {
+		var msg Message
+		err = connReader.Decode(&msg)
+		if err != nil {
+			log.Panicf("[Error: %s]: Error parsing Message from client\n", err.Error())
+		}
+		shaHash := sha256.Sum256([]byte(msg.EncryptedData))
+		err = encryption.RSAVerify(&hostData.PublicKey, shaHash[:], msg.Signature)
+		if err != nil {
+			log.Panicf("[Error: %s]: Message Compromised, Digital Signature don't match\n", err.Error())
+		}
+		var decryptedMessage = c.AESKey.Decrypt(msg.EncryptedData)
+		ui.AddMessage(hostData.Name, string(decryptedMessage))
 	}
-	decrypted, _ := c.RSAKeyPair.RSADecrypt(message.EncryptedData)
-	fmt.Printf("Message: %v\n", string(decrypted))
 }
 
 func (c *chatapp) Run() {
