@@ -32,6 +32,7 @@ type chatapp struct {
 	AppConfig *Config
 	KeyPair   *encryption.KeyPair
 	AESKey    *encryption.AESKey
+	IP        string
 }
 
 type HandshakeMessage1 struct {
@@ -116,7 +117,7 @@ func getCode(IP net.IP, port uint16) string {
 
 func (c *chatapp) runHost() {
 	//Open TCP Socket
-	var listener, err = net.Listen("tcp4", fmt.Sprintf("%s:%d", "127.0.0.1", c.AppConfig.Port))
+	var listener, err = net.Listen("tcp4", fmt.Sprintf("%s:%d", c.IP, c.AppConfig.Port))
 	if err != nil {
 		log.Panicf("[Error: %s]: Error opening TCP socket\n", err.Error())
 	}
@@ -137,6 +138,16 @@ func (c *chatapp) runHost() {
 	if err != nil {
 		log.Panicf("[Error: %s]: Error reading RSA Public Key from client\n", err.Error())
 	}
+
+	fmt.Printf("New Connection Request by Name: %s, IP: %s\n", clientData.Name, conn.RemoteAddr().String())
+
+	var allowConnection bool = false
+	fmt.Print("Allow Connection [true/FALSE]:")
+	fmt.Scanf("%t\n", &allowConnection)
+	if !allowConnection {
+		return
+	}
+
 	encryptedKey, err := c.AESKey.EncryptKeyByRSA(clientData.PublicKey)
 	if err != nil {
 		log.Panicf("[Error: %s]: Error encrypting AES Key\n", err.Error())
@@ -276,6 +287,7 @@ func (c *chatapp) Run() {
 	if c.AppConfig.IsHost {
 		if !c.AppConfig.IsLocal {
 			//Use this code for connection between host-client
+			c.IP = c.Device.PublicIP.String()
 			code := getCode(c.Device.PublicIP, c.Device.ForwardedPort)
 			fmt.Printf("Connection Code: %v\n", code)
 			log.Printf("[Info]: Connection Code: %v\n", code)
@@ -284,11 +296,13 @@ func (c *chatapp) Run() {
 			var localConn, err = net.Dial("udp", "1.1.1.1:80")
 			if err != nil {
 				//Can be a panic wont allow running if not connected to a network
+				c.IP = "127.0.0.1"
 				log.Printf("[Warning: %s]: You are not connected to a network", err.Error())
 			} else {
 				localIP = net.ParseIP(strings.Split(localConn.LocalAddr().String(), ":")[0])
 				localConn.Close()
 			}
+			c.IP = localIP.String()
 			code := getCode(localIP, c.AppConfig.Port)
 			fmt.Printf("Connection Code: %v\n", code)
 			log.Printf("[Info]: Connection Code: %v\n", code)
