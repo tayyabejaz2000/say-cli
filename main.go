@@ -17,7 +17,7 @@ func main() {
 	var help = flag.Bool("help", false, "Display Help Page")
 	flag.Parse()
 
-	if *help || len(os.Args) < 2 {
+	if *help {
 		flag.Usage()
 		return
 	}
